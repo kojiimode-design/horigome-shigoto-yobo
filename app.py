@@ -3,67 +3,90 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import requests
-from datetime import datetime
 
-st.set_page_config(page_title="堀籠天気仕事予報", layout="wide")
+# ページ設定
+st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# 岩見沢の天気予報を取得する関数
-def get_weather():
-    try:
-        # 気象庁のAPI（岩見沢を含む空知地方の予報）
-        url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
-        response = requests.get(url)
-        data = response.json()
-        
-        # 岩見沢周辺の予報を抽出
-        area_data = data[0]["timeSeries"][0]["areas"][0]
-        weather_list = area_data["weathers"]
-        
-        return weather_list[0], weather_list[1] # 今日と明日の天気
-    except:
-        return "取得失敗だぉ", "取得失敗だぉ"
+# CSSでデザインをColab風に改造
+st.markdown("""
+    <style>
+    .main { background-color: #2b2b2b; }
+    .weather-card {
+        background: linear-gradient(180deg, #a1eafb 0%, #d1d1f0 100%);
+        border-radius: 20px;
+        padding: 20px;
+        color: #333;
+        font-family: 'sans-serif';
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .date-text { font-weight: bold; width: 80px; }
+    .weather-text { flex-grow: 1; text-align: center; }
+    .job-text { 
+        background: rgba(255,255,255,0.7);
+        padding: 5px 15px;
+        border-radius: 15px;
+        min-width: 150px;
+        text-align: center;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# 画面表示
-st.title("堀籠天気仕事予報 🌤️")
+st.markdown("<h2 style='text-align: center; color: white;'>📋 堀籠天気仕事予報</h2>", unsafe_allow_html=True)
 
-# 天気予報エリア
-today_w, tomorrow_w = get_weather()
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("今日の岩見沢", today_w)
-with col2:
-    st.metric("明日の岩見沢", tomorrow_w)
+# 天気アイコン変換
+def get_icon(w_text):
+    if "晴" in w_text: return "☀️"
+    if "雨" in w_text: return "☔"
+    if "雪" in w_text: return "❄️"
+    return "☁️"
 
-st.divider()
+# 1. 天気予報を取得
+try:
+    w_url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+    w_data = requests.get(w_url).json()
+    # 岩見沢エリアの予報
+    area = w_data[0]["timeSeries"][0]["areas"][0]
+    weathers = area["weathers"]
+    dates = ["1/30(金)", "1/31(土)", "2/1(日)", "2/2(月)", "2/3(火)", "2/4(水)", "2/5(木)"]
+except:
+    weathers = ["不明"] * 7
+    dates = ["不明"] * 7
 
-# スプレッドシート読み込み
+# 2. スプレッドシート（仕事予定）を取得
 try:
     scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    
-    creds_info = {
-        "type": st.secrets["gspread_credentials"]["type"],
-        "project_id": st.secrets["gspread_credentials"]["project_id"],
-        "private_key_id": st.secrets["gspread_credentials"]["private_key_id"],
-        "private_key": st.secrets["gspread_credentials"]["private_key"],
-        "client_email": st.secrets["gspread_credentials"]["client_email"],
-        "token_uri": st.secrets["gspread_credentials"]["token_uri"],
-        "auth_uri": st.secrets["gspread_credentials"]["auth_uri"],
-    }
-
+    creds_info = st.secrets["gspread_credentials"]
     credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
     gc = gspread.authorize(credentials)
-
-    spreadsheet_id = st.secrets["spreadsheet_id"]
-    sh = gc.open_by_key(spreadsheet_id)
+    sh = gc.open_by_key(st.secrets["spreadsheet_id"])
     worksheet = sh.get_worksheet(0)
-    
-    data = worksheet.get_all_values()
-    if data:
-        df = pd.DataFrame(data[1:], columns=data[0])
-        st.write("### 📝 仕事メモ")
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.write("シートにデータがないぉ！")
+    sheet_data = pd.DataFrame(worksheet.get_all_records())
+    # 日付をキーにして行程を辞書化
+    job_dict = dict(zip(sheet_data['日付'], sheet_data['行程']))
+except:
+    job_dict = {}
 
-except Exception as e:
-    st.error(f"エラーだぉ：{e}")
+# 3. デザインに合わせて表示
+for i in range(len(weathers)):
+    d_str = dates[i]
+    # スプレッドシートの日付形式（2026-2-2等）に合わせて検索
+    # 簡易的にインデックスで紐付け
+    display_date = d_str
+    
+    # 行程を取得（とりあえず日付が合うものを入れる）
+    job_key = f"2026-2-{i-1}" # ここはシートの形式に合わせる必要あり
+    job_text = job_dict.get(job_key, "") 
+    
+    # 1枚目のスクショを再現するHTML
+    st.markdown(f"""
+        <div class="weather-card">
+            <div class="date-text">{d_str}</div>
+            <div class="weather-text">{get_icon(weathers[min(i,1)])} {weathers[min(i,1)][:5]}</div>
+            <div class="job-text">{job_text if job_text else "　"}</div>
+        </div>
+    """, unsafe_allow_html=True)
