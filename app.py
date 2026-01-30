@@ -57,7 +57,7 @@ def get_weather_data():
         temps = []
         for i in range(len(weathers)):
             # 本来は詳細なパースが必要だけど、まずは固定表示に近い形で出すぉ
-            temps.append("2℃ / -5℃") 
+            temps.append("2℃ / -35℃") 
         return weathers, temps
     except:
         return ["不明"] * 10, ["-- / --"] * 10
