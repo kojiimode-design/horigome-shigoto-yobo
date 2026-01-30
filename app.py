@@ -1,106 +1,112 @@
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 import pandas as pd
 import requests
 from datetime import datetime
-import gspread
-from google.oauth2.service_account import Credentials
 
-# --- 1. スプレッドシート読み込み（上から7行に制限） ---
-def load_gsheet_data():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    creds = Credentials.from_service_account_info(st.secrets["gspread_credentials"], scopes=scopes)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(st.secrets["spreadsheet_id"]).sheet1
-    data = sheet.get_all_records()
-    # 最初の7日分だけ取得するぉ！
-    return pd.DataFrame(data).head(7)
+st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# --- 2. 気象データ取得（さらに安全にしたぉ） ---
-def get_weather_data():
-    url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
-    weather_map = {}
-    try:
-        res = requests.get(url).json()
-        # 3日分予報
-        for ts in res[0]['timeSeries']:
-            times = ts.get('timeDefines', [])
-            for area in ts.get('areas', []):
-                if "空知" in area['area']['name'] or "岩見沢" in area['area']['name']:
-                    for i in range(len(times)):
-                        dt = datetime.fromisoformat(times[i])
-                        date_key = f"{dt.year}-{dt.month}-{dt.day}"
-                        if date_key not in weather_map:
-                            weather_map[date_key] = {"weather": "取得中", "temp": "--"}
-                        if 'weathers' in area:
-                            weather_map[date_key]["weather"] = area['weathers'][i].replace('　', ' ')
-                        if 'temps' in area:
-                            weather_map[date_key]["temp"] = f"{area['temps'][i]}℃"
-        # 週間予報で補完
-        ts_week = res[1]['timeSeries'][0]
-        week_times = ts_week['timeDefines']
-        week_area = ts_week['areas'][0]
-        for i in range(len(week_times)):
-            dt = datetime.fromisoformat(week_times[i])
-            date_key = f"{dt.year}-{dt.month}-{dt.day}"
-            if date_key not in weather_map or weather_map[date_key]["weather"] == "取得中":
-                weather_map[date_key] = {
-                    "weather": week_area['weathers'][i].replace('　', ' '),
-                    "temp": "--"
-                }
-    except Exception:
-        pass # エラー表示を消してスッキリさせるぉ
-    return weather_map
-
-# --- 3. メイン画面 ---
-def main():
-    st.set_page_config(page_title="堀籠天気仕事予報", layout="wide")
-
-    # CSS: カードを横に並べてスクロールさせるぉ
-    st.markdown("""
-        <style>
-        .main { background-color: #0e1117; }
-        .stColumn {
-            background: linear-gradient(135deg, #ffdee9 0%, #b5fffc 100%);
-            border-radius: 12px; padding: 10px; margin: 5px;
-            min-width: 140px; text-align: center; color: #444;
-            box-shadow: 2px 2px 8px rgba(0,0,0,0.2);
-        }
-        h3 { margin-bottom: 0px; font-size: 1.2rem; }
-        .job-label { font-size: 0.8rem; font-weight: bold; margin-top: 5px; color: #333; }
-        </style>
+# --- デザイン設定（こーじのこだわりを継承だぉ！） ---
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
+    .weather-card {
+        background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+        border-radius: 20px;
+        padding: 10px 18px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        font-family: 'Noto Sans JP', sans-serif;
+        max-width: 480px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .date-text { font-weight: bold; width: 65px; font-size: 0.9rem; color: #555; }
+    .weather-content { flex-grow: 1; display: flex; flex-direction: column; align-items: center; padding: 0 10px; }
+    .weather-main { display: flex; align-items: center; font-size: 0.8rem; color: #444; }
+    .temp-text { font-size: 0.85rem; font-weight: bold; margin-top: 2px; }
+    .job-capsule {
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 7px 15px;
+        border-radius: 15px;
+        font-weight: bold;
+        color: #333;
+        min-width: 140px;
+        text-align: center;
+        font-size: 0.85rem;
+    }
+    </style>
     """, unsafe_allow_html=True)
 
-    st.title("☀️ 堀籠天気仕事予報 🛠️")
+st.markdown("<h2 style='text-align: center; color: #444;'>📋 堀籠天気仕事予報</h2>", unsafe_allow_html=True)
 
+# --- 1. 天気データを「日付キー」で取得するロジック ---
+@st.cache_data(ttl=3600)
+def get_weather_dict():
+    weather_map = {}
     try:
-        df = load_gsheet_data()
-        weather_dict = get_weather_data()
-        job_col = '仕事内容' if '仕事内容' in df.columns else df.columns[1]
+        url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+        res = requests.get(url).json()
+        
+        # 週間予報のデータを解析
+        ts_week = res[1]["timeSeries"]
+        times = ts_week[0]["timeDefines"]
+        weathers = ts_week[0]["areas"][0]["weathers"]
+        max_temps = ts_week[1]["areas"][0]["tempsMax"]
+        min_temps = ts_week[1]["areas"][0]["tempsMin"]
+        
+        for i in range(len(times)):
+            dt = datetime.fromisoformat(times[i])
+            # スプレッドシートの形式「2026-2-2」に合わせるキーを作成
+            date_key = f"{dt.year}-{dt.month}-{dt.day}"
+            weather_map[date_key] = {
+                "weather": weathers[i],
+                "max": max_temps[i] if max_temps[i] != "" else "--",
+                "min": min_temps[i] if min_temps[i] != "" else "--"
+            }
+    except:
+        pass
+    return weather_map
 
-        # 1行に7個のカラムを並べるぉ
-        cols = st.columns(len(df))
+weather_dict = get_weather_dict()
 
-        for i, (index, row) in enumerate(df.iterrows()):
-            raw_date = str(row['日付']).strip()
-            # 2026-2-2形式に変換してマッチング
-            try:
-                dt_obj = pd.to_datetime(raw_date)
-                match_key = f"{dt_obj.year}-{dt_obj.month}-{dt_obj.day}"
-            except:
-                match_key = raw_date
+# --- 2. スプレッドシート取得と表示 ---
+try:
+    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    creds_info = st.secrets["gspread_credentials"]
+    credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
+    gc = gspread.authorize(credentials)
+    sh = gc.open_by_key(st.secrets["spreadsheet_id"])
+    worksheet = sh.get_worksheet(0)
+    # 最初の7日間だけ表示するぉ！
+    all_rows = worksheet.get_all_records()[:7] 
+    
+    for row in all_rows:
+        date_val = str(row.get('日付', '')).strip()
+        # 表示用のフォーマット (2026-2-2 -> 2/2)
+        display_date = date_val.replace("2026-", "").replace("-", "/")
+        job_val = str(row.get('行程', row.get('仕事内容', ' '))) # 「行程」か「仕事内容」どちらでもOK
+        
+        # 日付キーで天気を検索（1ミリの狂いもなく紐付け！）
+        w_info = weather_dict.get(date_val, {"weather": "予報なし", "max": "--", "min": "--"})
+        w_text = w_info["weather"]
+        
+        # アイコン判定
+        icon = "☀️" if "晴" in w_text else "☔" if "雨" in w_text else "❄️" if "雪" in w_text else "☁️"
 
-            w_info = weather_dict.get(match_key, {"weather": "予報なし", "temp": "--"})
-            icon = "☀️" if "晴" in w_info['weather'] else "☔" if "雨" in w_info['weather'] else "☃️" if "雪" in w_info['weather'] else "☁️"
+        st.markdown(f"""
+            <div class="weather-card">
+                <div class="date-text">{display_date}</div>
+                <div class="weather-content">
+                    <div class="weather-main"><span>{icon}</span>&nbsp;{w_text[:10]}</div>
+                    <div class="temp-text"><span style='color:#ff6b6b'>{w_info['max']}</span> / <span style='color:#4a90e2'>{w_info['min']}</span> ℃</div>
+                </div>
+                <div class="job-capsule">{job_val}</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-            with cols[i]:
-                st.markdown(f"**{raw_date}**")
-                st.write(f"### {icon}")
-                st.caption(w_info['weather'][:10] + ("..." if len(w_info['weather']) > 10 else "")) # 長い天気名は切るぉ
-                st.markdown(f"<span style='color:red; font-weight:bold;'>{w_info['temp']}</span>", unsafe_allow_html=True)
-                st.markdown(f"<div class='job-label'>{row[job_col]}</div>", unsafe_allow_html=True)
-
-    except Exception as e:
-        st.error(f"エラーだぉ: {e}")
-
-if __name__ == "__main__":
-    main()
+except Exception as e:
+    st.error(f"読み込みエラーだぉ、こーじ！：{e}")
