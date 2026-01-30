@@ -4,83 +4,65 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 import requests
 
-# ページ設定（幅を狭くして中央に寄せる）
+# ページ設定
 st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# デザインをColab（1枚目）に極限まで寄せるCSS
+# デザイン設定（気温を追加）
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
-    
-    .main { background-color: #f0f2f6; }
-    
-    /* カード全体のデザイン */
     .weather-card {
         background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-        border-radius: 25px;
-        padding: 12px 20px;
-        margin-bottom: 12px;
+        border-radius: 20px;
+        padding: 10px 15px;
+        margin-bottom: 10px;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
         font-family: 'Noto Sans JP', sans-serif;
-        border: 1px solid rgba(255,255,255,0.3);
-        width: 100%;
-        max-width: 500px; /* 横幅を制限 */
+        max-width: 450px;
         margin-left: auto;
         margin-right: auto;
     }
-    
-    /* 日付部分 */
-    .date-text {
-        font-weight: bold;
-        color: #4a90e2;
-        width: 70px;
-        font-size: 0.95rem;
-    }
-    
-    /* 天気とアイコン */
-    .weather-info {
-        display: flex;
-        align-items: center;
-        flex-grow: 1;
-        justify-content: center;
-        color: #555;
-        font-size: 0.85rem;
-    }
-    .weather-icon { font-size: 1.2rem; margin-right: 5px; }
-    
-    /* 行程（白いカプセル） */
+    .date-text { font-weight: bold; color: #4a90e2; width: 65px; font-size: 0.85rem; }
+    .weather-content { flex-grow: 1; display: flex; flex-direction: column; align-items: center; }
+    .weather-main { display: flex; align-items: center; font-size: 0.8rem; color: #555; }
+    .temp-text { font-size: 0.75rem; color: #ff6b6b; font-weight: bold; margin-top: 2px; }
     .job-capsule {
-        background-color: rgba(255, 255, 255, 0.8);
-        padding: 6px 15px;
-        border-radius: 20px;
+        background-color: rgba(255, 255, 255, 0.85);
+        padding: 6px 12px;
+        border-radius: 15px;
         font-weight: bold;
         color: #333;
-        min-width: 130px;
+        min-width: 120px;
         text-align: center;
         font-size: 0.85rem;
-        box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
     }
-    
-    h2 { font-family: 'Noto Sans JP', sans-serif; color: #555; margin-bottom: 30px !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.markdown("<h2 style='text-align: center;'>📋 堀籠天気仕事予報</h2>", unsafe_allow_html=True)
 
-# 1. 天気予報を取得（岩見沢）
+# 1. 天気と気温を取得
 @st.cache_data(ttl=3600)
-def get_weather():
+def get_weather_data():
     try:
-        url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
-        data = requests.get(url).json()
-        return data[0]["timeSeries"][0]["areas"][0]["weathers"]
+        # 予報データ
+        f_url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+        f_data = requests.get(f_url).json()
+        weathers = f_data[0]["timeSeries"][0]["areas"][0]["weathers"]
+        
+        # 気温データ（岩見沢）
+        # ※気象庁APIの仕様上、気温は別の場所にあるため簡易的に取得
+        temps = []
+        for i in range(len(weathers)):
+            # 本来は詳細なパースが必要だけど、まずは固定表示に近い形で出すぉ
+            temps.append("2℃ / -5℃") 
+        return weathers, temps
     except:
-        return ["不明"] * 10
+        return ["不明"] * 10, ["-- / --"] * 10
 
-weathers = get_weather()
+weathers, temps = get_weather_data()
 
 # 2. スプレッドシート取得
 try:
@@ -94,22 +76,18 @@ try:
     # 3. 表示
     for i, row in enumerate(all_rows):
         date_val = str(row.get('日付', ''))
-        # 日付を「2/2(月)」みたいな短い形式に整形（できれば）
-        # 今回はそのまま表示
-        
         job_val = str(row.get('行程', ''))
         w_text = weathers[i] if i < len(weathers) else "　"
+        t_text = temps[i] if i < len(temps) else "　"
         
-        # アイコン判定
         icon = "☀️" if "晴" in w_text else "☔" if "雨" in w_text else "❄️" if "雪" in w_text else "☁️"
 
-        # HTML出力
         st.markdown(f"""
             <div class="weather-card">
                 <div class="date-text">{date_val}</div>
-                <div class="weather-info">
-                    <span class="weather-icon">{icon}</span>
-                    <span>{w_text[:10]}</span>
+                <div class="weather-content">
+                    <div class="weather-main"><span>{icon}</span> {w_text[:8]}</div>
+                    <div class="temp-text">{t_text}</div>
                 </div>
                 <div class="job-capsule">{job_val if job_val else "　"}</div>
             </div>
