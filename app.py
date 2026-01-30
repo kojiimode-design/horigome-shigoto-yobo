@@ -4,10 +4,9 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 import requests
 
-# ページ設定
 st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# デザイン設定（気温を追加）
+# デザイン設定
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
@@ -43,26 +42,33 @@ st.markdown("""
 
 st.markdown("<h2 style='text-align: center;'>📋 堀籠天気仕事予報</h2>", unsafe_allow_html=True)
 
-# 1. 天気と気温を取得
+# 1. 1週間分の天気と気温を取得
 @st.cache_data(ttl=3600)
-def get_weather_data():
+def get_full_weather():
     try:
-        # 予報データ
-        f_url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
-        f_data = requests.get(f_url).json()
-        weathers = f_data[0]["timeSeries"][0]["areas"][0]["weathers"]
+        # 週間予報のURL（岩見沢周辺）
+        url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+        data = requests.get(url).json()
         
-        # 気温データ（岩見沢）
-        # ※気象庁APIの仕様上、気温は別の場所にあるため簡易的に取得
-        temps = []
+        # 0:今日明日, 1:週間予報
+        weekly_data = data[1]["timeSeries"]
+        weathers = weekly_data[0]["areas"][0]["weathers"]
+        
+        # 気温（週間予報から抽出）
+        temps_max = weekly_data[1]["areas"][0]["tempsMax"]
+        temps_min = weekly_data[1]["areas"][0]["tempsMin"]
+        
+        full_temps = []
         for i in range(len(weathers)):
-            # 本来は詳細なパースが必要だけど、まずは固定表示に近い形で出すぉ
-            temps.append("2℃ / -5℃") 
-        return weathers, temps
+            max_t = temps_max[i] if i < len(temps_max) else "--"
+            min_t = temps_min[i] if i < len(temps_min) else "--"
+            full_temps.append(f"{max_t}℃ / {min_t}℃")
+            
+        return weathers, full_temps
     except:
         return ["不明"] * 10, ["-- / --"] * 10
 
-weathers, temps = get_weather_data()
+weathers, temps = get_full_weather()
 
 # 2. スプレッドシート取得
 try:
@@ -77,8 +83,10 @@ try:
     for i, row in enumerate(all_rows):
         date_val = str(row.get('日付', ''))
         job_val = str(row.get('行程', ''))
+        
+        # 配列の範囲外にならないように調整
         w_text = weathers[i] if i < len(weathers) else "　"
-        t_text = temps[i] if i < len(temps) else "　"
+        t_text = temps[i] if i < len(temps) else "-- / --"
         
         icon = "☀️" if "晴" in w_text else "☔" if "雨" in w_text else "❄️" if "雪" in w_text else "☁️"
 
@@ -94,4 +102,4 @@ try:
         """, unsafe_allow_html=True)
 
 except Exception as e:
-    st.error(f"読み込みエラーだぉ：{e}")
+    st.error(f"エラー：{e}")
