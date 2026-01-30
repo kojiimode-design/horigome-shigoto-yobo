@@ -5,124 +5,144 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# --- 基本設定だぉ ---
+# --- ページ設定 ---
 st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# --- デザイン設定（こーじのレイアウトを完全固定だぉ！） ---
+# --- デザイン設定（Colabのデザインをブラウザで再現だぉ！） ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
-    .weather-card {
+    
+    /* 全体背景 */
+    .main-container {
+        background-color: #333; /* 背景は暗めにしてカードを目立たせるぉ */
+        padding: 20px;
+        border-radius: 40px;
+    }
+
+    /* メインの大きなカード */
+    .colab-card {
         background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-        border-radius: 20px;
-        padding: 10px 18px;
-        margin-bottom: 10px;
+        border-radius: 35px;
+        padding: 25px 30px;
+        font-family: 'Noto Sans JP', sans-serif;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        max-width: 600px;
+        margin: auto;
+    }
+    
+    /* 1日分の行 */
+    .day-row {
         display: flex;
         align-items: center;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-        font-family: 'Noto Sans JP', sans-serif;
-        max-width: 480px;
-        margin-left: auto;
-        margin-right: auto;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.4);
     }
-    .date-text { font-weight: bold; width: 65px; font-size: 0.9rem; color: #555; }
-    .weather-content { flex-grow: 1; display: flex; flex-direction: column; align-items: center; padding: 0 10px; }
-    .weather-main { display: flex; align-items: center; font-size: 0.8rem; color: #444; }
-    .temp-text { font-size: 0.85rem; font-weight: bold; margin-top: 2px; }
+    .day-row:last-child { border-bottom: none; }
+
+    /* 日付 (1/30 (金) 形式) */
+    .date-text { width: 100px; font-weight: bold; font-size: 0.95rem; }
+    .sat { color: #4a90e2; } 
+    .sun { color: #ff6b6b; } 
+
+    /* 天気と気温の並び */
+    .weather-info { flex-grow: 1; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .temp-max { color: #ff6b6b; font-weight: bold; }
+    .temp-min { color: #4a90e2; font-weight: bold; }
+
+    /* 仕事内容のカプセル */
     .job-capsule {
-        background-color: rgba(255, 255, 255, 0.9);
-        padding: 7px 15px;
+        background: rgba(255, 255, 255, 0.7);
+        padding: 6px 15px;
         border-radius: 15px;
-        font-weight: bold;
-        color: #333;
-        min-width: 140px;
+        min-width: 150px;
         text-align: center;
+        font-weight: bold;
         font-size: 0.85rem;
+        color: #333;
     }
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown("<h2 style='text-align: center; color: #444;'>📋 堀籠天気仕事予報</h2>", unsafe_allow_html=True)
-
-# --- 1. 天気データを「日付をキーにした辞書」で取得（これが1ミリも狂わないコツだぉ！） ---
+# --- 1. 天気と気温を読み込む最強ロジックだぉ ---
 @st.cache_data(ttl=3600)
-def get_weather_dict():
+def get_weather_data():
     weather_map = {}
     try:
         url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         res = requests.get(url).json()
         
-        # 週間予報の方（res[1]）から取得するぉ
+        # 週間予報から日付・天気・気温を取得
         ts_week = res[1]["timeSeries"]
-        times = ts_week[0]["timeDefines"]
-        weathers = ts_week[0]["areas"][0]["weathers"]
+        w_times = ts_week[0]["timeDefines"]
+        w_weathers = ts_week[0]["areas"][0]["weathers"]
+        w_max = ts_week[1]["areas"][0].get("tempsMax", ["--"] * len(w_times))
+        w_min = ts_week[1]["areas"][0].get("tempsMin", ["--"] * len(w_times))
         
-        # 気温（最高・最低）
-        max_temps = ts_week[1]["areas"][0].get("tempsMax", ["--"] * len(times))
-        min_temps = ts_week[1]["areas"][0].get("tempsMin", ["--"] * len(times))
-        
-        for i in range(len(times)):
-            dt = datetime.fromisoformat(times[i])
-            # スプレッドシートの「2026-2-2」形式に合わせたキーを作るぉ
+        for i in range(len(w_times)):
+            dt = datetime.fromisoformat(w_times[i])
             date_key = f"{dt.year}-{dt.month}-{dt.day}"
             weather_map[date_key] = {
-                "weather": weathers[i],
-                "max": max_temps[i] if max_temps[i] != "" else "--",
-                "min": min_temps[i] if min_temps[i] != "" else "--"
+                "w": w_weathers[i],
+                "ma": w_max[i] if w_max[i] != "" else "--",
+                "mi": w_min[i] if w_min[i] != "" else "--"
             }
-    except Exception as e:
-        # エラーが出てもアプリを止めない工夫だぉ
-        pass
+    except: pass
     return weather_map
 
-weather_dict = get_weather_dict()
+weather_dict = get_weather_data()
 
-# --- 2. スプレッドシート取得と表示 ---
+# --- 2. スプレッドシート読み込みと表示 ---
 try:
     scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     creds_info = st.secrets["gspread_credentials"]
     credentials = Credentials.from_service_account_info(creds_info, scopes=scope)
     gc = gspread.authorize(credentials)
-    sh = gc.open_by_key(st.secrets["spreadsheet_id"])
-    worksheet = sh.get_worksheet(0)
+    worksheet = gc.open_by_key(st.secrets["spreadsheet_id"]).get_worksheet(0)
     
-    # 週間予報なので直近7日分だけ出すぉ！
+    # 週間分(7日)を取得
     all_rows = worksheet.get_all_records()[:7] 
-    
-    for row in all_rows:
-        # スプレッドシートの日付を文字列として取得
-        date_val = str(row.get('日付', '')).strip()
-        
-        # 表示用の形式（例：2/2）
-        try:
-            dt_obj = pd.to_datetime(date_val)
-            display_date = f"{dt_obj.month}/{dt_obj.day}"
-            # マッチング用のキー（2026-2-2）
-            match_key = f"{dt_obj.year}-{dt_obj.month}-{dt_obj.day}"
-        except:
-            display_date = date_val
-            match_key = date_val
 
-        # 天気辞書から「日付」で検索！これが1ミリも狂わない秘訣だぉ！
-        w_info = weather_dict.get(match_key, {"weather": "予報なし", "max": "--", "min": "--"})
-        w_text = w_info["weather"]
-        
-        # アイコン判定
+    # Colabカード開始
+    html = '<div class="colab-card">'
+    html += '<h2 style="text-align: center; color: #555; margin-bottom: 20px;">📋 堀籠天気仕事予報</h2>'
+
+    for row in all_rows:
+        date_val = str(row.get('日付', '')).strip()
+        try:
+            dt = pd.to_datetime(date_val)
+            wd = ["月", "火", "水", "木", "金", "土", "日"][dt.weekday()]
+            wd_class = "sat" if dt.weekday() == 5 else "sun" if dt.weekday() == 6 else ""
+            display_date = f"{dt.month}/{dt.day} ({wd})"
+            match_key = f"{dt.year}-{dt.month}-{dt.day}"
+        except:
+            display_date, match_key, wd_class = date_val, date_val, ""
+
+        # 天気情報を取得
+        w_info = weather_dict.get(match_key, {"w": "予報なし", "ma": "--", "mi": "--"})
+        w_text = w_info["w"]
         icon = "☀️" if "晴" in w_text else "☔" if "雨" in w_text else "❄️" if "雪" in w_text else "☁️"
         
-        # こーじの指定した「行程」を表示（なければ「仕事内容」を探すぉ）
-        job_val = str(row.get('行程', row.get('仕事内容', '未定')))
+        job_val = str(row.get('行程', row.get('仕事内容', ' ')))
 
-        st.markdown(f"""
-            <div class="weather-card">
-                <div class="date-text">{display_date}</div>
-                <div class="weather-content">
-                    <div class="weather-main"><span>{icon}</span>&nbsp;{w_text[:10]}</div>
-                    <div class="temp-text"><span style='color:#ff6b6b'>{w_info['max']}</span> / <span style='color:#4a90e2'>{w_info['min']}</span> ℃</div>
+        # 1行分のHTML
+        html += f"""
+            <div class="day-row">
+                <div class="date-text {wd_class}">{display_date}</div>
+                <div class="weather-info">
+                    <span>{icon}</span>
+                    <span style="font-size:0.7rem; width:50px; text-align:center;">{w_text[:5]}</span>
+                    <span class="temp-max">{w_info['ma']}</span> / <span class="temp-min">{w_info['mi']}</span>
                 </div>
                 <div class="job-capsule">{job_val}</div>
             </div>
-        """, unsafe_allow_html=True)
+        """
+
+    html += '</div>'
+    html += '<p style="text-align:center; font-size:0.7rem; color:#ccc; margin-top:15px;">※スプレッドシート「堀籠天気メモ」から自動取得中だぉ</p>'
+    
+    st.markdown(html, unsafe_allow_html=True)
 
 except Exception as e:
-    st.error(f"読み込みエラーだぉ、こーじ！：{e}")
+    st.error(f"エラーだぉ、こーじ！：{e}")
