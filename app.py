@@ -5,9 +5,10 @@ import pandas as pd
 import requests
 from datetime import datetime
 
+# --- 基本設定だぉ ---
 st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# --- デザイン設定（こーじのこだわりを継承だぉ！） ---
+# --- デザイン設定（こーじのレイアウトを完全固定だぉ！） ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
@@ -43,7 +44,7 @@ st.markdown("""
 
 st.markdown("<h2 style='text-align: center; color: #444;'>📋 堀籠天気仕事予報</h2>", unsafe_allow_html=True)
 
-# --- 1. 天気データを「日付キー」で取得するロジック ---
+# --- 1. 天気データを「日付をキーにした辞書」で取得（これが1ミリも狂わないコツだぉ！） ---
 @st.cache_data(ttl=3600)
 def get_weather_dict():
     weather_map = {}
@@ -51,23 +52,26 @@ def get_weather_dict():
         url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         res = requests.get(url).json()
         
-        # 週間予報のデータを解析
+        # 週間予報の方（res[1]）から取得するぉ
         ts_week = res[1]["timeSeries"]
         times = ts_week[0]["timeDefines"]
         weathers = ts_week[0]["areas"][0]["weathers"]
-        max_temps = ts_week[1]["areas"][0]["tempsMax"]
-        min_temps = ts_week[1]["areas"][0]["tempsMin"]
+        
+        # 気温（最高・最低）
+        max_temps = ts_week[1]["areas"][0].get("tempsMax", ["--"] * len(times))
+        min_temps = ts_week[1]["areas"][0].get("tempsMin", ["--"] * len(times))
         
         for i in range(len(times)):
             dt = datetime.fromisoformat(times[i])
-            # スプレッドシートの形式「2026-2-2」に合わせるキーを作成
+            # スプレッドシートの「2026-2-2」形式に合わせたキーを作るぉ
             date_key = f"{dt.year}-{dt.month}-{dt.day}"
             weather_map[date_key] = {
                 "weather": weathers[i],
                 "max": max_temps[i] if max_temps[i] != "" else "--",
                 "min": min_temps[i] if min_temps[i] != "" else "--"
             }
-    except:
+    except Exception as e:
+        # エラーが出てもアプリを止めない工夫だぉ
         pass
     return weather_map
 
@@ -81,21 +85,33 @@ try:
     gc = gspread.authorize(credentials)
     sh = gc.open_by_key(st.secrets["spreadsheet_id"])
     worksheet = sh.get_worksheet(0)
-    # 最初の7日間だけ表示するぉ！
+    
+    # 週間予報なので直近7日分だけ出すぉ！
     all_rows = worksheet.get_all_records()[:7] 
     
     for row in all_rows:
+        # スプレッドシートの日付を文字列として取得
         date_val = str(row.get('日付', '')).strip()
-        # 表示用のフォーマット (2026-2-2 -> 2/2)
-        display_date = date_val.replace("2026-", "").replace("-", "/")
-        job_val = str(row.get('行程', row.get('仕事内容', ' '))) # 「行程」か「仕事内容」どちらでもOK
         
-        # 日付キーで天気を検索（1ミリの狂いもなく紐付け！）
-        w_info = weather_dict.get(date_val, {"weather": "予報なし", "max": "--", "min": "--"})
+        # 表示用の形式（例：2/2）
+        try:
+            dt_obj = pd.to_datetime(date_val)
+            display_date = f"{dt_obj.month}/{dt_obj.day}"
+            # マッチング用のキー（2026-2-2）
+            match_key = f"{dt_obj.year}-{dt_obj.month}-{dt_obj.day}"
+        except:
+            display_date = date_val
+            match_key = date_val
+
+        # 天気辞書から「日付」で検索！これが1ミリも狂わない秘訣だぉ！
+        w_info = weather_dict.get(match_key, {"weather": "予報なし", "max": "--", "min": "--"})
         w_text = w_info["weather"]
         
         # アイコン判定
         icon = "☀️" if "晴" in w_text else "☔" if "雨" in w_text else "❄️" if "雪" in w_text else "☁️"
+        
+        # こーじの指定した「行程」を表示（なければ「仕事内容」を探すぉ）
+        job_val = str(row.get('行程', row.get('仕事内容', '未定')))
 
         st.markdown(f"""
             <div class="weather-card">
