@@ -5,7 +5,7 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# --- ページ設定 ---
+# --- ページ設定だぉ ---
 st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
 # --- 1. 天気と気温を読み込む（最強版） ---
@@ -16,11 +16,11 @@ def get_weather_data():
         url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         res = requests.get(url).json()
         
-        # 週間予報（res[1]）から取得
+        # 週間予報（res[1]）から取得だぉ
         ts_week = res[1]["timeSeries"]
         w_times = ts_week[0]["timeDefines"]
         w_weathers = ts_week[0]["areas"][0]["weathers"]
-        # 最高気温と最低気温
+        # 最高気温と最低気温を取得
         w_max = ts_week[1]["areas"][0].get("tempsMax", ["--"] * len(w_times))
         w_min = ts_week[1]["areas"][0].get("tempsMin", ["--"] * len(w_times))
         
@@ -48,7 +48,7 @@ try:
     all_rows = worksheet.get_all_records()[:7] # 直近7日分
 
     # --- 3. デザイン（CSS）とカード本体を組み立てるぉ！ ---
-    # ここでColabのあの見た目を1ミリの狂いもなく再現するぉ！
+    # Colabのあの「1枚の大きなカード」をここで作るぉ！
     html_content = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
@@ -98,13 +98,13 @@ try:
         icon = "☀️" if "晴" in w_info["w"] else "☔" if "雨" in w_info["w"] else "❄️" if "雪" in w_info["w"] else "☁️"
         job_val = str(row.get('行程', row.get('仕事内容', ' ')))
 
-        # 1日ずつの行をhtml_contentに足していくぉ
+        # ここで1日分のデータを行として追加だぉ
         html_content += f"""
         <div class="day-row">
             <div class="date-col {wd_class}">{display_date}</div>
             <div class="weather-col">
                 <span>{icon}</span>
-                <span style="font-size:0.75rem; width:55px;">{w_info['w'][:5]}</span>
+                <span style="font-size:0.75rem; width:55px; text-align:center;">{w_info['w'][:5]}</span>
                 <span class="temp-max">{w_info['ma']}</span> / <span class="temp-min">{w_info['mi']}</span>
             </div>
             <div class="job-col">{job_val}</div>
@@ -113,8 +113,8 @@ try:
 
     html_content += "</div>" # カードを閉じる
     
-    # 最後に一気に、魔法の言葉「unsafe_allow_html=True」で表示！
+    # 【最重要！】ここで一気にHTMLとして表示させるぉ！
     st.markdown(html_content, unsafe_allow_html=True)
 
 except Exception as e:
-    st.error(f"読み込みエラーだぉ、こーじ！：{e}")
+    st.error(f"エラーだぉ、こーじ！：{e}")
