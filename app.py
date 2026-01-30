@@ -5,21 +5,22 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-# --- ページ設定だぉ ---
+# --- ページ設定 ---
 st.set_page_config(page_title="堀籠天気仕事予報", layout="centered")
 
-# --- 1. 天気データを取得するロジックだぉ ---
+# --- 1. 天気と気温を読み込む（最強版） ---
 @st.cache_data(ttl=3600)
-def get_weather_dict():
+def get_weather_data():
     weather_map = {}
     try:
         url = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         res = requests.get(url).json()
         
-        # 週間予報から日付・天気・気温を取得
+        # 週間予報（res[1]）から取得
         ts_week = res[1]["timeSeries"]
         w_times = ts_week[0]["timeDefines"]
         w_weathers = ts_week[0]["areas"][0]["weathers"]
+        # 最高気温と最低気温
         w_max = ts_week[1]["areas"][0].get("tempsMax", ["--"] * len(w_times))
         w_min = ts_week[1]["areas"][0].get("tempsMin", ["--"] * len(w_times))
         
@@ -31,13 +32,12 @@ def get_weather_dict():
                 "ma": w_max[i] if w_max[i] != "" else "--",
                 "mi": w_min[i] if w_min[i] != "" else "--"
             }
-    except:
-        pass
+    except: pass
     return weather_map
 
-weather_dict = get_weather_dict()
+weather_dict = get_weather_data()
 
-# --- 2. スプレッドシート読み込みと表示だぉ ---
+# --- 2. スプレッドシート読み込み ---
 try:
     scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     creds_info = st.secrets["gspread_credentials"]
@@ -45,14 +45,14 @@ try:
     gc = gspread.authorize(credentials)
     sh = gc.open_by_key(st.secrets["spreadsheet_id"])
     worksheet = sh.get_worksheet(0)
-    all_rows = worksheet.get_all_records()[:7] # 直近1週間
+    all_rows = worksheet.get_all_records()[:7] # 直近7日分
 
-    # --- 3. Colabデザインを再現するHTML/CSSだぉ！ ---
-    # まるごと一つの文字列にして st.markdown で表示するぉ
-    html_code = """
+    # --- 3. デザイン（CSS）とカード本体を組み立てるぉ！ ---
+    # ここでColabのあの見た目を1ミリの狂いもなく再現するぉ！
+    html_content = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
-        .main-card {
+        .colab-card {
             background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
             border-radius: 30px;
             padding: 25px 20px;
@@ -67,20 +67,20 @@ try:
             padding: 12px 5px; border-bottom: 1px solid rgba(255, 255, 255, 0.4);
         }
         .day-row:last-child { border-bottom: none; }
-        .date-part { width: 90px; font-weight: bold; font-size: 0.9rem; }
+        .date-col { width: 95px; font-weight: bold; font-size: 0.95rem; }
         .sat { color: #4a90e2; } .sun { color: #ff6b6b; }
-        .weather-part { flex-grow: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .weather-col { flex-grow: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .temp-max { color: #ff6b6b; font-weight: bold; }
         .temp-min { color: #4a90e2; font-weight: bold; }
-        .job-part {
+        .job-col {
             background: rgba(255, 255, 255, 0.8);
             padding: 6px 12px; border-radius: 12px;
-            min-width: 130px; text-align: center;
-            font-weight: bold; font-size: 0.8rem;
+            min-width: 140px; text-align: center;
+            font-weight: bold; font-size: 0.85rem;
         }
     </style>
-    <div class="main-card">
-        <h2 style="text-align: center; font-size: 1.4rem; margin-bottom: 15px;">📋 堀籠天気仕事予報</h2>
+    <div class="colab-card">
+        <h2 style="text-align: center; font-size: 1.4rem; margin-bottom: 20px;">📋 堀籠天気仕事予報</h2>
     """
 
     for row in all_rows:
@@ -96,24 +96,25 @@ try:
 
         w_info = weather_dict.get(match_key, {"w": "予報なし", "ma": "--", "mi": "--"})
         icon = "☀️" if "晴" in w_info["w"] else "☔" if "雨" in w_info["w"] else "❄️" if "雪" in w_info["w"] else "☁️"
-        job_val = str(row.get('行程', row.get('仕事内容', '未定')))
+        job_val = str(row.get('行程', row.get('仕事内容', ' ')))
 
-        html_code += f'''
+        # 1日ずつの行をhtml_contentに足していくぉ
+        html_content += f"""
         <div class="day-row">
-            <div class="date-part {wd_class}">{display_date}</div>
-            <div class="weather-part">
+            <div class="date-col {wd_class}">{display_date}</div>
+            <div class="weather-col">
                 <span>{icon}</span>
-                <span style="font-size:0.7rem; width:50px; text-align:center;">{w_info["w"][:5]}</span>
-                <span class="temp-max">{w_info["ma"]}</span> / <span class="temp-min">{w_info["mi"]}</span>
+                <span style="font-size:0.75rem; width:55px;">{w_info['w'][:5]}</span>
+                <span class="temp-max">{w_info['ma']}</span> / <span class="temp-min">{w_info['mi']}</span>
             </div>
-            <div class="job-part">{job_val}</div>
+            <div class="job-col">{job_val}</div>
         </div>
-        '''
+        """
 
-    html_code += "</div>"
+    html_content += "</div>" # カードを閉じる
     
-    # 最後に一気に表示！
-    st.markdown(html_code, unsafe_allow_html=True)
+    # 最後に一気に、魔法の言葉「unsafe_allow_html=True」で表示！
+    st.markdown(html_content, unsafe_allow_html=True)
 
 except Exception as e:
-    st.error(f"エラーだぉ、こーじ！：{e}")
+    st.error(f"読み込みエラーだぉ、こーじ！：{e}")
